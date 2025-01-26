@@ -1,0 +1,251 @@
+/* SWEN90004 - Assignment 1b
+ * 
+ * FSP model for Emergency Department(ED)
+ *
+ * Author: Dong Hyeog Jang (582238)
+ * Date  : 02/04/2024
+ */
+
+/* 
+ * Task 3 - Modified model of Emergency Department (ED)
+ * 
+ * Modifications:
+ *   - Actions      : added new action called acquireOrderiesFromFoyer
+ *   - NURSE        : change acquireOrderies to acquireOrderiesFromFoyer when acquiring
+ *                    orderies from Foyer
+ *   - ORDERIES     : added availability checking when orderies are acquired from Foyer
+ *   - SAFE_ORDERIES: updated property to take acquireOrderiesFromFoyer into account
+ */
+const N_Nurses = 3      // Number of nurses in ED
+const N_Orderies = 8    // Number of total orderies
+const T_Orderies = 3    // Number of orderies needed for tranfer
+
+const Foyer = 0         // Represent Foyer Area in ED
+const Triage = 1        // Represent Triage Area in ED
+const Treatment = 2     // Represent Treatment Area in ED
+
+const True = 1          // Boolean value for true
+const False = 0         // Boolean Value for false
+
+range R_Nurses = 0..N_Nurses        
+range R_Orderies = 0..N_Orderies     
+range Locations = Foyer..Treatment
+range Bool = False..True
+
+// Set of shared actions
+set Actions = {patientArriveAtED, patientDepartFromED, allocatePatientWithNurse, deallocatePatientWithNurse,
+    enterFoyer, leaveFoyer, enterTriage, leaveTriage, enterTreatment, leaveTreatment, acquireOrderies, 
+    releaseOrderies, specialistTreatPatient, specialistEnterTreatment, specilistLeaveTreatment,
+    waitForTreatment, treatmentFinished, acquireOrderiesFromFoyer}
+
+// Produce new patient to ED.
+PRODUCER = (patientArriveAtED -> PRODUCER) + Actions.
+
+// Consume treated patient from ED.
+CONSUMER = (patientDepartFromED -> CONSUMER) + Actions.
+
+/* Sequence of actions for nurse based on locations in ED and allocation status with patient.
+ * The nurse starts in Foyer, unallocaed, and it begin its action by being allocated to a
+ * patient.
+ * 
+ *   loc      : Current location of the nurse (Foyer, Triage, Treatment)
+ *   allocated: Allocation status with a patient
+ */
+NURSE = NURSE[Foyer][False],
+NURSE [loc: Locations][allocated: Bool] = 
+    ( // Allocate to new patient and leave foyer
+      when (loc == Foyer && allocated == False)
+        allocatePatientWithNurse -> acquireOrderiesFromFoyer -> leaveFoyer -> NURSE[Triage][True]
+    | // Return to foyer and deallocate with the patient
+      when (loc == Foyer && allocated == True)
+        enterFoyer -> releaseOrderies -> deallocatePatientWithNurse -> NURSE[Foyer][False]
+    | // Access severity of patient and depending on severity go to treatment or foyer
+      when (loc == Triage)
+        enterTriage -> releaseOrderies -> accessSeverity -> acquireOrderies ->leaveTriage ->
+        ( notSevere -> NURSE[Foyer][True]
+        | severe -> NURSE[Treatment][False])
+    | // Wait for patient to get treated and return to foyer
+      when (loc == Treatment)
+        enterTreatment -> releaseOrderies -> waitForTreatment -> treatmentFinished -> 
+        acquireOrderies -> leaveTreatment -> NURSE[Foyer][True]
+    ) + Actions.
+
+// Sequence of actions for specialist.
+SPECIALIST = (specialistEnterTreatment -> specialistTreatPatient -> specilistLeaveTreatment -> SPECIALIST) + Actions.
+
+/* Number of orderies avaiable to acquire by nurses to transfer the patients.
+ * Acquiring or releasing orderies will decrease or increase the number of 
+ * avaiable orderies by T_Orderies. When orderies are acquired from Foyer
+ * it will estimate in advance to check its avaiability compared to number
+ * of nurses who are escorting patients.
+ * 
+ *   n     : Number of orderies avaiable
+ *   lefted: Number of nurses lefted Foyer with a patient
+ */
+ORDERIES = ORDERIES[N_Orderies][0],
+ORDERIES [n:R_Orderies][lefted:R_Nurses] =
+    ( when (lefted < N_Nurses)
+        leaveFoyer -> ORDERIES[n][lefted+1]
+    | when (lefted > 0)
+        enterFoyer -> ORDERIES[n][lefted-1]
+    | when (n >= (lefted + 1) * T_Orderies)
+        acquireOrderiesFromFoyer -> ORDERIES[n-T_Orderies][lefted]
+    | when (n >= T_Orderies)
+        acquireOrderies -> ORDERIES[n-T_Orderies][lefted]
+    | when (n <= N_Orderies - T_Orderies)
+        releaseOrderies -> ORDERIES[n+T_Orderies][lefted]
+    ).
+
+/* A model representing Foyer in ED, specifying the actions based on various states.
+ * Patients can arrive at or depart from ED, allocated or deallocated with a nurse
+ * and also track number of avaiable nurses to escort the patient in ED. Only one
+ * patient can be admitted at a time and likewise one patient can depart at a time.
+ *
+ *  enter         : Boolean value representing whether a new patient arrived at Foyer
+ *  exit          : Boolean value representing whether a treated patient returned to Foyer
+ *  enterAllocated: Boolean value representing whether a newly entered patient is allocated
+                    to a nurse
+ *  exitAllocated : Boolean value representing whether a treated patient is still allocated
+                    to a nurse
+ *  nurses        : Number of nurses in Foyer ready to take patients with them
+ */
+FOYER = FOYER[False][False][False][False][N_Nurses],
+FOYER [enter:Bool][exit:Bool][enterAllocated:Bool][exitAllocated:Bool][nurses:R_Nurses] =
+    ( // admit patient into Foyer if it is empty
+      when (enter == False)
+        patientArriveAtED -> FOYER[True][exit][enterAllocated][exitAllocated][nurses]
+    | // allocate patient to a nurse if there is available nurse
+      when (enter == True && enterAllocated == False && nurses > 0)
+        allocatePatientWithNurse -> FOYER[enter][exit][True][exitAllocated][nurses-1]
+    | // if patient is allocated to a nures then leave Foyer
+      when (enter == True && enterAllocated == True)
+        leaveFoyer -> FOYER[False][exit][False][exitAllocated][nurses]
+    | // enter Foyer if there is no patient waiting for departure
+      when (exit == False)
+        enterFoyer -> FOYER[enter][True][enterAllocated][True][nurses]
+    | // deallocate patient with nurse
+       when (exit == True && exitAllocated == True && nurses < N_Nurses)
+        deallocatePatientWithNurse -> FOYER[enter][exit][enterAllocated][False][nurses+1]
+    | // if patient is deallocated then depart
+      when (exit == True && exitAllocated == False)
+        patientDepartFromED -> FOYER[enter][False][enterAllocated][exitAllocated][nurses]
+    ).
+
+/* A model representing Triage in ED. Only one patient is allowed in Triage at a time.
+ *
+ *  occupied: Boolean value to repsent occupancy state of the Triage
+ */
+TRIAGE = TRIAGE[False],
+TRIAGE [occupied: Bool] = 
+    ( when (occupied == False)
+        enterTriage -> TRIAGE[True]
+    | when (occupied == True)
+        leaveTriage -> TRIAGE[False]
+    ).
+
+/* A model representing Treatment in ED. Specialist and a patient enter the treatment
+ * at any time. Once they are both in the treatment the specialist treat the patient
+ * and leave the treatment. Patient then leave the treatment.
+ *
+ *   occupied         : Boolean value representing presence of patient in treatment
+ *   specialistPresent: Boolean value representing presence of specialist in treatment
+ *   treated          : Boolean value representing whether patient is treated or not
+ */
+TREATMENT = TREATMENT[False][False][False],
+TREATMENT [occupied:Bool][specialistPresent:Bool][treated:Bool] =
+    ( // patient enter Treatment if it is not occupied
+      when (occupied == False && treated == False)
+        enterTreatment -> TREATMENT[True][specialistPresent][treated]
+    | // specialist enter Treatment if there is no treated patient who have not yet left
+      when (specialistPresent == False && treated == False)
+        specialistEnterTreatment -> TREATMENT[occupied][True][False]
+    | // specialist treat patient if both untreated patient and specialist are in Treatment
+      when (occupied == True && specialistPresent == True && treated == False)
+        waitForTreatment -> specialistTreatPatient -> treatmentFinished -> TREATMENT[occupied][specialistPresent][True]
+    | // specialist leave Treatment after the patient is treated
+      when (specialistPresent == True && treated == True)
+        specilistLeaveTreatment -> TREATMENT[occupied][False][treated]
+    | // patient leave the Treatment after the treatment
+      when (occupied == True && specialistPresent == False && treated == True)
+        leaveTreatment -> TREATMENT[False][specialistPresent][False]
+    ).
+
+// Overall ED system
+||ED = 
+    (  nurses[i:1..N_Nurses] : NURSE 
+    || specialist : SPECIALIST 
+    || producer : PRODUCER 
+    || consumer : CONSUMER
+    || {nurses[i:1..N_Nurses]} :: ORDERIES
+    || {nurses[i:1..N_Nurses], producer, consumer} :: FOYER
+    || {nurses[i:1..N_Nurses]} :: TRIAGE
+    || {nurses[i:1..N_Nurses], specialist} :: TREATMENT
+    ).
+
+
+/*
+ * Task 2 - Safety and Liveness Properties for FSP model above
+ */
+
+// Check that nurse is allocated to a patient before it deallocate from a patient
+property SAFE_NURSE = (allocatePatientWithNurse -> deallocatePatientWithNurse -> SAFE_NURSE).
+
+// Check that specialist entered treatment before leaving treatment
+property SAFE_SPECIALIST = (specialistEnterTreatment -> specilistLeaveTreatment -> SAFE_SPECIALIST).
+
+// Check that patient arrive at ED before leaving Foyer
+property SAFE_FOYER_ARRIVE = (patientArriveAtED -> leaveFoyer -> SAFE_FOYER_ARRIVE).
+
+// Check that patient entered Foyer before departing from ED
+property SAFE_FOYER_DEPART = (enterFoyer -> patientDepartFromED -> SAFE_FOYER_DEPART).
+
+// Check that patient entered Triage before leaving Triage
+property SAFE_TRIAGE = (enterTriage -> leaveTriage -> SAFE_TRIAGE).
+
+// Check that patient entered Treatment before leaving Treatment
+property SAFE_TREATMENT = (enterTreatment -> leaveTreatment -> SAFE_TREATMENT).
+      
+// Check that orderies are released for each acquire.
+property SAFE_ORDERIES = 
+    ( acquireOrderiesFromFoyer -> TRANSFER[N_Orderies-T_Orderies]
+    | acquireOrderies -> TRANSFER[N_Orderies-T_Orderies]),
+TRANSFER [n:R_Orderies] =
+    ( when (n > T_Orderies)
+        acquireOrderiesFromFoyer -> TRANSFER[n-T_Orderies]
+    | when (n > T_Orderies)
+        acquireOrderies -> TRANSFER[n-T_Orderies]
+    | when (n == N_Orderies - T_Orderies)
+        releaseOrderies -> SAFE_ORDERIES
+    | when (n < N_Orderies - T_Orderies)
+        releaseOrderies -> TRANSFER[n+T_Orderies]
+    ).
+
+// Overall ED system with safety check
+||SAFE_ED = 
+    (  nurses[i:1..N_Nurses] : (NURSE || SAFE_NURSE) 
+    || specialist : (SPECIALIST || SAFE_SPECIALIST)
+    || producer : PRODUCER 
+    || consumer : CONSUMER
+    || {nurses[i:1..N_Nurses]} :: (ORDERIES || SAFE_ORDERIES)
+    || {nurses[i:1..N_Nurses], producer, consumer} :: (FOYER || SAFE_FOYER_ARRIVE || SAFE_FOYER_DEPART)
+    || {nurses[i:1..N_Nurses]} :: (TRIAGE || SAFE_TRIAGE)
+    || {nurses[i:1..N_Nurses], specialist} :: (TREATMENT || SAFE_TREATMENT)
+    ).
+
+// Check that producer will eventually produce patient to ED
+progress PATIENT_ADMISSION = {producer.patientArriveAtED}
+
+// Check that consumer will eventually consume patient from ED
+progress PATIENT_DEPARTURE = {consumer.patientDepartFromED}
+
+// Check that nurse will eventually be allocated to a patient
+progress ALLOCATION[i:1..N_Nurses] = {nurses[i].allocatePatientWithNurse}
+
+// Check that nurse will eventually be deallocated from a patient
+progress DEALLOCATION[i:1..N_Nurses] = {nurses[i].deallocatePatientWithNurse}
+
+// Check that nurse will eventually access severity of a patient
+progress ACCESS_SEVERITY[i:1..N_Nurses] = {nurses[i].accessSeverity}
+
+// Check that specialist will eventually treat patient
+progress TREAT_PATIENT = {specialist.specialistTreatPatient}
