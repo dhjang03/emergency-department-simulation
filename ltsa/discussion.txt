@@ -1,0 +1,60 @@
+SWEN90004 - Assignment 1b
+Author: Dong Hyeog Jang (582238)
+Date  : 02/04/2024
+
+Task 4 - Discussion
+
+The original FSP model for the Emergency Department (ED) system has a deadlock problem. The deadlock
+arise from an issue where a nurse who is in either Triage or Treatment attempts to acquire
+orderlies to transfer the patient but there are no orderlies available to obtain because there are
+nurses with orderlies awaiting entry to the Triage or Treatment. The trace from LTSA to this
+problem can be found below:
+
+Trace to DEADLOCK:
+	specialist.specialistEnterTreatment
+	producer.patientArriveAtED
+	nurses.1.allocatePatientWithNurse
+	nurses.1.acquireOrderies
+	nurses.1.leaveFoyer
+	nurses.1.enterTriage
+	nurses.1.releaseOrderies
+	nurses.1.accessSeverity
+	producer.patientArriveAtED
+	nurses.2.allocatePatientWithNurse
+	nurses.2.acquireOrderies
+	nurses.2.leaveFoyer
+	producer.patientArriveAtED
+	nurses.3.allocatePatientWithNurse
+	nurses.3.acquireOrderies
+	nurses.3.leaveFoyer
+	producer.patientArriveAtED
+
+The above trace illustrates a deadlock situation where Nurse 1 is unable to acquire orderlies because
+there are not enough orderlies left to obtain as Nurse 2 and 3 acquired them and waiting to enter 
+the Triage.
+
+Before the submission for Assignment 1a, I was able to detect the deadlock although the trace to
+the deadlock was different from the one illustrated above. The deadlock that was observed arose
+from Producer consecutively producing severe patients. With consecutive severe patients, the nurses
+deadlocked at the Treatment where the nurse in the Treatment could not acquire orderlies because other 
+nurses already took the orderlies.
+
+On the other hand, there could be a case where I was not able to detect such a deadlock. Due to a
+nondeterministic behaviour of concurrent systems, the output of the system varies between each run. 
+Thus, the deadlock situation I observed from Assignment 1a may not always occur in each run.
+
+To resolve the deadlock problem, I separated the orderlies acquirement in the Foyer from orderlies
+acquirement in the Triage and Treatment. When a nurse tries to acquire orderlies in the Foyer, it
+will also consider the number of nurses who already left the Foyer with a patient, plus itself. It 
+will acquire the orderlies if the remaining orderlies are greater or equal to "transfer orderlies * 
+(number of nurses left foyer + 1)". This will ensure that at least one group of transfer orderlies 
+is available for a nurse in Triage or Treatment to acquire and leave the corresponding department.
+
+With the modified version of the system, there could be trade-offs in system performance:
+    - The system now has to keep track of the number of nurses who left the Foyer and adjust orderlies
+      allocation dynamically. This introduces additional complexity in orderlies management and
+      introduces computational overhead to the system.
+    - By ensuring that a group of orderlies is always available for nurses in Triage or Treatment, 
+      the system may not utilize orderlies as efficiently as possible. This could lead to scenarios
+      where orderlies are idle waiting for their next assignment, especially if the demand in the 
+      Foyer is low.
