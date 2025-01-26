@@ -1,0 +1,53 @@
+Author: Dong Hyeog Jang (582238)
+Date  : 11 March 2024
+
+Question 1. 
+There are 3 different department type in the Emergency Department, Foyer, Triage and Treatment. 
+Patients are admitted and discharged via Foyer. Triage and Treatment is place where patients are 
+examined and treated, depending on the severity of the patients. Triage and Treatment can have at 
+most one patient at any time.
+
+Once a patients are admitted to Foyer, they will be allocated to a nurse who will care them during 
+their stay in the ED. Nurses will acquire orderlies between transfer of the patient from one 
+department to another. Orderlies are only accompanying the nurse and the patient during the 
+transfer; they will be released once the patient arrive at the destination. 
+
+One thing to point out is that nurses can start transferring the patient to next department even if
+the destined department is occupied by another patient. In such case, they will be waiting for the
+department to be emptied. For example, if patient 1 is in triage and a nurse started transferring 
+patient 2 from foyer to triage, the nurse and patient 2 will wait until patient 1 leave the triage. 
+
+For Treatment, there are two scenarios that can happen. One is that the specialist is not at the
+Treatment, hence the patient has to wait until the specialist enters the Treatment before he gets
+the treated. Another is that specialist enters the Treatment, but there is no patients available.
+In this case, the specialist has to wait until a patient to be transferred to the Treatment.
+
+Question 2.
+The system suffer from Deadlock. The starvation may occur in following scenario:
+    - There are 3 nurses, 8 orderlies and 3 orderlies are required to transfer patient.
+    - Nurse 1 take patient 1 to Triage and patient 1 undergo examination.
+    - While patient 1 is under examination, nurse 2 and nurse 3 acquire orderlies and transfer their
+    patient to Triage, but since Triage is under use by patient 1 they will wait.
+    - Examination on patient 1 is finished and nurse 1 tried to acquire orderlies. However, there
+    is not enough orderlies hire so nurse 1 wait until there are enough orderlies to hire.
+
+In the above scenario nurse 1 will never get orderlies because nurse 2 and nurse 3 is waiting for
+the Triage to be emptied which can never happen unless nurse 1 take patient 1 to next department. 
+
+Question 3.
+The source of deadlock problem above is unbalance between number of orderlies and the nurses.
+The system require at least `number or nurses` * `number of transfer orderlies` orderlies to be free
+from such starvation problem.
+
+Question 4.
+The key design problems I confronted was with the extent of responsibility that a Thread Model
+should take and the concurrency control. For example, which method should have synchronized keyword,
+which variable should have volatile keyword and when and where a thread shoud wait and be notify of
+certain condition.
+
+Question 5.
+I gain more insights on scope of wait() and notify() or notifyAll() methods from Thread. The
+startTreament method from Treatment class makes a thread to wait until `treated` flag from the
+patient to be true. Once the specialist change this `treated` flag to true and call notifyAll(),
+this will not make the thread waiting on the flag to run due to scope problem. The specialist need
+to call treatment.notifyAll() to achieve intented behaviour.
